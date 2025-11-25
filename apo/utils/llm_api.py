@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
+from openai import OpenAI
 
 
 @dataclass
@@ -32,7 +33,46 @@ class DummyLLMClient(LLMClient):
 
     def generate(self, prompt: str) -> str:
         # 返回模拟输出用于测试
+        print(f"[DEBUG] DummyLLMClient.generate() called with prompt length: {len(prompt)}")
+        print(f"[DEBUG] Prompt preview: {prompt[:100]}...")
         return "DUMMY_PROMPT: " + prompt[:200]
+
+
+class OpenAILLMClient(LLMClient):
+    """
+    真实的 OpenAI API 客户端实现（支持 OpenAI 兼容接口）。
+    用于生成和改进提示词的优化器 LLM。
+    """
+
+    def __init__(self, config: LLMConfig, api_key: str, base_url: str):
+        super().__init__(config)
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url
+        )
+        print(f"[INFO] Initialized OpenAI client: model={config.model_name}, base_url={base_url}")
+
+    def generate(self, prompt: str) -> str:
+        """调用 OpenAI API 生成文本"""
+        try:
+            print(f"[DEBUG] OpenAILLMClient.generate() calling API with prompt length: {len(prompt)}")
+
+            response = self.client.chat.completions.create(
+                model=self.config.model_name,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens
+            )
+
+            generated_text = response.choices[0].message.content
+            print(f"[DEBUG] API response received, length: {len(generated_text)}")
+            return generated_text
+
+        except Exception as e:
+            print(f"[ERROR] OpenAI API call failed: {e}")
+            raise
 
 
 class TaskModel(ABC):
@@ -58,4 +98,44 @@ class DummyTaskModel(TaskModel):
 
     def infer(self, full_prompt: str, input_text: str) -> str:
         # 返回模拟输出用于测试
+        print(f"[DEBUG] DummyTaskModel.infer() called")
+        print(f"[DEBUG] Full prompt length: {len(full_prompt)}, Input text length: {len(input_text)}")
+        print(f"[DEBUG] Input preview: {input_text[:100]}...")
         return "YES"
+
+
+class OpenAITaskModel(TaskModel):
+    """
+    真实的 OpenAI API 任务模型实现。
+    用于执行实际的任务推理。
+    """
+
+    def __init__(self, config: LLMConfig, api_key: str, base_url: str):
+        super().__init__(config)
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url
+        )
+        print(f"[INFO] Initialized OpenAI task model: model={config.model_name}, base_url={base_url}")
+
+    def infer(self, full_prompt: str, input_text: str) -> str:
+        """调用 API 执行任务推理"""
+        try:
+            # 构建完整的推理消息
+            response = self.client.chat.completions.create(
+                model=self.config.model_name,
+                messages=[
+                    {"role": "user", "content": full_prompt}
+                ],
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens
+            )
+
+            content = response.choices[0].message.content
+            result = content.strip() if content else ""
+            return result
+
+        except Exception as e:
+            print(f"[ERROR] Task model API call failed: {e}")
+            # 返回空字符串以避免中断整个流程
+            return ""

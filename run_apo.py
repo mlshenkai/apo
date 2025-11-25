@@ -15,20 +15,20 @@ def main():
     parser.add_argument(
         "--rounds",
         type=int,
-        default=5,
-        help="Number of optimization rounds (generations)."
+        default=None,
+        help="Number of optimization rounds (default: from .env DEFAULT_ROUNDS)."
     )
     parser.add_argument(
         "--train_path",
         type=str,
         default=None,
-        help="Path to train.jsonl (if None, use default under datasets/)."
+        help="Path to train.jsonl (if None, use default under local_datasets/)."
     )
     parser.add_argument(
         "--test_path",
         type=str,
         default=None,
-        help="Path to test.jsonl (if None, use default under datasets/)."
+        help="Path to test.jsonl (if None, use default under local_datasets/)."
     )
     args = parser.parse_args()
 

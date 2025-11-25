@@ -7,10 +7,11 @@ import os
 import json
 import numpy as np
 
+from apo.config import get_config
 from apo.utils.llm_api import (
     LLMConfig,
-    DummyLLMClient,
-    DummyTaskModel,
+    OpenAILLMClient,
+    OpenAITaskModel,
     TaskModel,
     LLMClient,
 )
@@ -45,11 +46,12 @@ def evaluate_prompt_on_dataset(
       - preds
       - labels
     """
+    print(f"[DEBUG] evaluate_prompt_on_dataset() called with {len(dataset)} samples")
     preds: List[Any] = []
     labels: List[Any] = []
     bad_cases: List[Tuple[Sample, str]] = []
 
-    for item in dataset:
+    for i, item in enumerate(dataset):
         input_text = item["input"]
         label = item["label"]
         # 这里你需要根据不同 task 的 prompt 模板拼接 full_prompt
@@ -57,56 +59,101 @@ def evaluate_prompt_on_dataset(
         full_prompt = prompt_text.replace("{input}", input_text)
         pred = task_model.infer(full_prompt, input_text)
 
+        if i < 3:  # Only print first 3 samples to avoid spam
+            print(f"[DEBUG] Sample {i}: pred={pred}, label={label}")
+
         preds.append(pred)
         labels.append(label)
         if pred != label:
             bad_cases.append((Sample(input_text=input_text, label=label), pred))
 
     score = task_metric(task, preds, labels)
+    print(f"[DEBUG] Evaluation complete: score={score:.4f}, bad_cases={len(bad_cases)}")
     return score, bad_cases, preds, labels
 
 
 def run_apo_pipeline(
     task: str,
-    n_rounds: int = 5,
+    n_rounds: Optional[int] = None,
     train_path: Optional[str] = None,
     test_path: Optional[str] = None,
 ):
+    # 加载配置
+    config = get_config()
+
+    # 使用配置中的默认值
+    if n_rounds is None:
+        n_rounds = config.optimization.default_rounds
+
     # 1. 数据路径
+    print(f"[DEBUG] Starting APO pipeline for task: {task}, rounds: {n_rounds}")
     if train_path is None or test_path is None:
         train_path, test_path = default_dataset_paths(task)
 
+    print(f"[DEBUG] Loading data from train: {train_path}, test: {test_path}")
     train_data = load_jsonl(train_path)
     test_data = load_jsonl(test_path)
+    print(f"[DEBUG] Loaded {len(train_data)} train samples, {len(test_data)} test samples")
 
-    # 2. 初始化 LLM
-    optimizer_llm: LLMClient = DummyLLMClient(
-        LLMConfig(model_name="gpt-4o", temperature=1.0)
+    # 2. 初始化 LLM（使用配置）
+    print(f"[DEBUG] Initializing optimizer LLM and task model")
+
+    # 使用真实的 OpenAI API 客户端
+    optimizer_llm: LLMClient = OpenAILLMClient(
+        LLMConfig(
+            model_name=config.optimizer_llm.model,
+            temperature=config.optimizer_llm.temperature,
+            max_tokens=config.optimizer_llm.max_tokens
+        ),
+        api_key=config.optimizer_llm.api_key,
+        base_url=config.optimizer_llm.base_url
     )
-    task_model: TaskModel = DummyTaskModel(
-        LLMConfig(model_name="doubao-pro", temperature=0.0)
+    task_model: TaskModel = OpenAITaskModel(
+        LLMConfig(
+            model_name=config.task_model.model_name,
+            temperature=config.task_model.temperature,
+            max_tokens=config.task_model.max_tokens
+        ),
+        api_key=config.task_model.api_key,
+        base_url=config.task_model.base_url
     )
+
+    print(f"[DEBUG] Models initialized successfully")
 
     # 3. 读取 initial prompt（这里只是示例，真实应从 prompts/initial/<task>.txt 读取）
     init_prompt_path = os.path.join("prompts", "initial", f"{task}.txt")
     if os.path.exists(init_prompt_path):
         with open(init_prompt_path, "r", encoding="utf-8") as f:
             base_prompt_text = f.read()
+        print(f"[DEBUG] Loaded initial prompt from {init_prompt_path}")
     else:
         base_prompt_text = "## Task\nSolve the problem.\n## Prediction\nInput: {input}\nOutput:"
+        print(f"[DEBUG] Using default initial prompt")
 
+    print(f"[DEBUG] Initial prompt preview: {base_prompt_text[:100]}...")
     prompt_population: List[PromptRecord] = [PromptRecord(text=base_prompt_text)]
     hard_tracker = HardCaseTracker(max_size=300)
 
-    # 4. 构建生成器 & 搜索器
-    bad_gen = BadCaseReflectionGenerator(optimizer_llm, n_prompts=10, n_iters=3)
-    evo_gen = EvolutionaryReflectionGenerator(optimizer_llm, n_mutation=5,
-                                              n_zero_order=5)
+    # 4. 构建生成器 & 搜索器（使用配置）
+    bad_gen = BadCaseReflectionGenerator(
+        optimizer_llm,
+        n_prompts=config.optimization.default_n_prompts,
+        n_iters=config.optimization.default_n_iters
+    )
+    evo_gen = EvolutionaryReflectionGenerator(optimizer_llm, n_mutation=5, n_zero_order=5)
     hard_gen = HardCasePromptGenerator(optimizer_llm, k=10)
 
-    embedder = PromptEmbedder()
-    bayes_selector = BayesianPromptSelector(xi=0.01, n_select=10)
-    mab_selector = MABPromptSelector(n_clusters=8, c=1.0, n_rounds=10, per_round=2)
+    embedder = PromptEmbedder(model_name=config.embedding.model_name)
+    bayes_selector = BayesianPromptSelector(
+        xi=config.search.bayesian_xi,
+        n_select=config.search.bayesian_n_select
+    )
+    mab_selector = MABPromptSelector(
+        n_clusters=config.search.mab_n_clusters,
+        c=1.0,
+        n_rounds=config.search.mab_n_rounds,
+        per_round=2
+    )
 
     # 5. 历史已评估 prompt embedding / score（供 Bayesian 使用）
     evaluated_embs: List[np.ndarray] = []
@@ -141,19 +188,26 @@ def run_apo_pipeline(
         # 6.2 生成 candidate prompts
         # 6.2.1 Bad-case Reflection 使用上一轮 best prompt + 最新 bad cases
         # 这里简单重算一次 bad cases，你也可以缓存
+        print(f"[Round {round_id}] Stage: Bad-case Reflection")
         _, bad_cases, _, _ = evaluate_prompt_on_dataset(
             task, best_prompt.text, task_model, train_data
         )
+        print(f"[Round {round_id}] Found {len(bad_cases)} bad cases, generating candidates...")
         bad_candidates = bad_gen.generate(best_prompt.text, bad_cases)
+        print(f"[Round {round_id}] Generated {len(bad_candidates)} bad-case candidates")
 
         # 6.2.2 Evolutionary Reflection 从当前 population 生成
+        print(f"[Round {round_id}] Stage: Evolutionary Reflection")
         evo_candidates = evo_gen.generate(
             [PromptCandidate(text=pr.text, score=pr.score) for pr in prompt_population]
         )
+        print(f"[Round {round_id}] Generated {len(evo_candidates)} evolutionary candidates")
 
         # 6.2.3 Hard-case 跟踪生成
+        print(f"[Round {round_id}] Stage: Hard-case Tracking")
         hard_prompt = hard_gen.generate(hard_tracker)
         hard_candidates = [hard_prompt] if hard_prompt is not None else []
+        print(f"[Round {round_id}] Generated {len(hard_candidates)} hard-case candidates")
 
         candidate_texts = bad_candidates + evo_candidates + hard_candidates
         print(f"[Round {round_id}] Generated {len(candidate_texts)} candidates.")
@@ -167,6 +221,7 @@ def run_apo_pipeline(
             break
 
         # 6.3 搜索：Bayesian + MAB 选出需要评估的 subset
+        print(f"[Round {round_id}] Stage: Search (Bayesian + MAB)")
         cand_embs = embedder.encode(candidate_texts)
 
         if evaluated_embs:
@@ -177,16 +232,21 @@ def run_apo_pipeline(
             eval_score_arr = np.zeros((0,), dtype=float)
 
         bayes_idx = bayes_selector.select(cand_embs, eval_emb_arr, eval_score_arr)
+        print(f"[Round {round_id}] Bayesian selected {len(bayes_idx)} candidates")
         mab_idx = mab_selector.select(cand_embs)
+        print(f"[Round {round_id}] MAB selected {len(mab_idx)} candidates")
         selected_idx = sorted(set(bayes_idx + mab_idx))
-        print(f"[Round {round_id}] Selected {len(selected_idx)} candidates for evaluation.")
+        print(f"[Round {round_id}] Total selected: {len(selected_idx)} candidates for evaluation.")
 
         # 6.4 对选中 prompts 在训练集上评估
-        for idx in selected_idx:
+        print(f"[Round {round_id}] Stage: Evaluating selected candidates")
+        for i, idx in enumerate(selected_idx):
             text = candidate_texts[idx]
+            print(f"[Round {round_id}] Evaluating candidate {i+1}/{len(selected_idx)}...")
             score, bad_cases, _, _ = evaluate_prompt_on_dataset(
                 task, text, task_model, train_data
             )
+            print(f"[Round {round_id}] Candidate {i+1} score: {score:.4f}")
             prompt_population.append(PromptRecord(text=text, score=score))
             emb = cand_embs[idx]
             evaluated_embs.append(emb)
@@ -202,17 +262,17 @@ def run_apo_pipeline(
         )
         print(f"[Round {round_id}] Best score so far: {best_now.score:.4f}")
 
-    # 7. 构建 Ensemble（简单版：用 top-K prompts）
+    # 7. 构建 Ensemble（使用配置）
     print("=== Building ensemble ===")
     prompt_population_sorted = sorted(
         prompt_population,
         key=lambda pr: pr.score if pr.score is not None else -1.0,
         reverse=True
     )
-    top_k = 5
+    top_k = config.ensemble.top_k
     ensemble_members: List[EnsembleMember] = []
 
-    # 在 train 上做一份“验证”预测（这里粗暴复用全部 train）
+    # 在 train 上做一份"验证"预测（这里粗暴复用全部 train）
     for pr in prompt_population_sorted[:top_k]:
         _, _, preds, _ = evaluate_prompt_on_dataset(
             task, pr.text, task_model, train_data
@@ -221,14 +281,18 @@ def run_apo_pipeline(
             EnsembleMember(prompt_text=pr.text, preds_on_val=preds, score=pr.score)
         )
 
-    # 使用任务对应的评估指标优化权重
+    # 使用任务对应的评估指标优化权重（使用配置）
     from apo.utils.evaluation import task_metric
 
     labels_train = [item["label"] for item in train_data]
     metric_fn = lambda preds, labels: task_metric(task, preds, labels)
     voter = EnsembleVoter(metric_fn)
-    weights = voter.optimize_weights(ensemble_members, labels_train, w_min=0.05,
-                                     n_steps=200)
+    weights = voter.optimize_weights(
+        ensemble_members,
+        labels_train,
+        w_min=config.ensemble.w_min,
+        n_steps=config.ensemble.n_steps
+    )
 
     print("Ensemble weights:", weights)
 

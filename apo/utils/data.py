@@ -16,7 +16,7 @@ def load_jsonl(path: str) -> List[Dict[str, Any]]:
 
 
 def default_dataset_paths(task: str) -> Tuple[str, str]:
-    base = os.path.join("datasets", task)
+    base = os.path.join("local_datasets", task)
     train_path = os.path.join(base, "train.jsonl")
     test_path = os.path.join(base, "test.jsonl")
     return train_path, test_path

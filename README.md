@@ -13,7 +13,7 @@ APO (Automatic Prompt Optimization) 是一个基于迭代反思和搜索的 LLM 
 
 ```
 APO/
-├── datasets/              # 数据集目录
+├── local_datasets/        # 数据集目录
 │   ├── liar/             # LIAR 数据集
 │   ├── bbh/              # BBH 数据集
 │   └── ...
@@ -52,21 +52,56 @@ pip install numpy scikit-learn scipy sentence-transformers
 
 ## 快速开始
 
-### 基本用法
+### 1️⃣ 测试 API 连接
+
+首先确保你的 LLM API 配置正确（已在 `.env` 中配置）：
 
 ```bash
-python run_apo.py --task liar --rounds 5
+python test_api.py
+```
+
+如果看到 `✅ All tests passed!`，则可以继续。
+
+### 2️⃣ 小规模测试运行
+
+建议先使用小数据集测试完整流程（~50 样本，1 轮优化）：
+
+```bash
+python test_small_run.py
+```
+
+这将：
+- 创建一个 50 样本的训练集和 10 样本的测试集
+- 运行 1 轮优化
+- 验证真实 LLM API 工作正常
+- 预估 API 调用量：~100 次
+
+### 3️⃣ 完整优化运行
+
+确认测试通过后，运行完整优化：
+
+```bash
+# 使用真实 LLM API (默认)
+python run_apo.py --task gsm8k --rounds 5
+
+# 快速测试 2 轮
+python run_apo.py --task gsm8k --rounds 2
+
+# 使用 dummy 模式测试（不调用 API）
+python run_apo.py --task gsm8k --rounds 2 --no-use_real_llm
 ```
 
 ### 参数说明
 
 - `--task`: 任务名称（必需）
   - 支持的任务：`liar`, `bbh`, `ethos`, `arsarcasm`, `wsc`, `gsm8k`
-- `--rounds`: 优化轮数（默认：5）
-- `--train_path`: 训练集路径（可选，默认使用 `datasets/<task>/train.jsonl`）
-- `--test_path`: 测试集路径（可选，默认使用 `datasets/<task>/test.jsonl`）
+- `--rounds`: 优化轮数（默认：从 .env 读取，通常为 5）
+- `--train_path`: 训练集路径（可选，默认使用 `local_datasets/<task>/train.jsonl`）
+- `--test_path`: 测试集路径（可选，默认使用 `local_datasets/<task>/test.jsonl`）
+- `--use_real_llm`: 使用真实 LLM API（默认：True）
+- `--no-use_real_llm`: 使用 dummy 模式测试，不调用 API
 
-### 示例
+### 更多示例
 
 ```bash
 # 在 LIAR 数据集上运行 10 轮优化
@@ -76,6 +111,9 @@ python run_apo.py --task liar --rounds 10
 python run_apo.py --task bbh --rounds 5 \
     --train_path /path/to/train.jsonl \
     --test_path /path/to/test.jsonl
+
+# 使用 dummy 模式快速测试流程（不消耗 API）
+python run_apo.py --task gsm8k --rounds 1 --no-use_real_llm
 ```
 
 ## 工作原理
@@ -105,9 +143,11 @@ python run_apo.py --task bbh --rounds 5 \
 
 ### 三层 LLM 架构
 
-- **优化器 LLM**：元级别模型，用于生成和改进提示词
-- **任务模型**：执行提示词并完成实际任务的模型
-- **当前实现**：使用 `DummyLLMClient` 和 `DummyTaskModel` 作为开发占位符
+- **优化器 LLM**：元级别模型，用于生成和改进提示词（如 GPT-4o）
+- **任务模型**：执行提示词并完成实际任务的模型（如 DeepSeek-V3）
+- **实现方式**：
+  - ✅ 真实 API 模式：`OpenAILLMClient` + `OpenAITaskModel`（通过 LiteLLM 代理）
+  - 🧪 测试模式：`DummyLLMClient` + `DummyTaskModel`（不调用 API，用于开发测试）
 
 ## 数据格式
 
@@ -120,7 +160,7 @@ python run_apo.py --task bbh --rounds 5 \
 ### 数据集目录结构
 
 ```
-datasets/<task>/
+local_datasets/<task>/
 ├── train.jsonl  # 训练集
 └── test.jsonl   # 测试集
 ```
@@ -134,13 +174,34 @@ datasets/<task>/
 
 ## 配置说明
 
-### 替换为真实 LLM API
+### LLM API 配置
 
-在生产环境中，需要：
+✅ **已完成真实 LLM API 集成**
 
-1. 在 `apo/utils/llm_api.py` 中实现真实的 API 调用
-2. 继承 `LLMClient` 和 `TaskModel` 抽象类
-3. 在 `apo/pipeline.py` 中替换 `DummyLLMClient` 和 `DummyTaskModel`
+系统支持通过 `.env` 文件配置真实的 LLM API：
+
+```env
+# 优化器 LLM (用于生成改进的提示词)
+OPTIMIZER_LLM_API_KEY=your_api_key
+OPTIMIZER_LLM_MODEL=openai/gpt-4o
+OPTIMIZER_LLM_BASE_URL=https://litellm.iyunquna.com/
+OPTIMIZER_LLM_TEMPERATURE=1.0
+OPTIMIZER_LLM_MAX_TOKENS=2048
+
+# 任务模型 (用于执行实际任务)
+TASK_MODEL_API_KEY=your_api_key
+TASK_MODEL_NAME=deepseek-v3
+TASK_MODEL_BASE_URL=https://litellm.iyunquna.com/
+TASK_MODEL_TEMPERATURE=0.0
+TASK_MODEL_MAX_TOKENS=2048
+```
+
+支持的实现：
+- `OpenAILLMClient`: 兼容 OpenAI API 格式的客户端
+- `OpenAITaskModel`: 兼容 OpenAI API 格式的任务模型
+- 通过 LiteLLM 代理支持多种 LLM 提供商
+
+查看完整配置说明：`REAL_LLM_SETUP.md`
 
 ### 提示词模板
 
@@ -184,7 +245,7 @@ datasets/<task>/
 
 ### 添加新任务
 
-1. 在 `datasets/` 下创建任务目录，放置 `train.jsonl` 和 `test.jsonl`
+1. 在 `local_datasets/` 下创建任务目录，放置 `train.jsonl` 和 `test.jsonl`
 2. 在 `prompts/initial/` 下创建初始提示词文件 `<task>.txt`
 3. 在 `run_apo.py` 的 `choices` 参数中添加任务名称
 4. 如需自定义指标，在 `apo/utils/evaluation.py` 的 `task_metric()` 中添加逻辑
@@ -215,12 +276,50 @@ datasets/<task>/
 }
 ```
 
-## 注意事项
+## 注意事项与成本预估
 
-- 当前实现使用虚拟 LLM 客户端，需替换为真实 API 才能正常工作
+### ⚠️ API 调用成本
+
+**GSM8K 完整数据集**（5 轮优化）：
+- 训练集：7,473 样本
+- 测试集：1,319 样本
+- **预估调用量**：
+  - 任务模型（DeepSeek-V3）：~40,000+ 次
+  - 优化器（GPT-4o）：~50-100 次
+
+### 💡 建议
+
+1. **首次运行使用小规模测试**：
+   ```bash
+   python test_small_run.py  # 仅 50 样本，1 轮
+   ```
+
+2. **逐步增加规模**：
+   ```bash
+   python run_apo.py --task gsm8k --rounds 1  # 全数据，1 轮
+   python run_apo.py --task gsm8k --rounds 2  # 全数据，2 轮
+   ```
+
+3. **使用 dummy 模式验证流程**：
+   ```bash
+   python run_apo.py --task gsm8k --rounds 5 --no-use_real_llm
+   ```
+
+4. **监控成本**：查看 LiteLLM 代理的使用统计
+
+### 其他注意事项
+
+- ✅ 真实 LLM API 已集成，可直接使用
 - 如果未安装 `sentence-transformers`，嵌入模块会降级为随机向量（仅用于测试）
 - 建议在小规模数据上先测试流程，再进行大规模优化
 - 优化轮数越多，API 调用成本越高，建议根据预算合理设置
+
+### 📁 新增文件
+
+- `test_api.py`: API 连接测试脚本
+- `test_small_run.py`: 小规模测试运行脚本
+- `REAL_LLM_SETUP.md`: LLM API 配置详细说明
+- `TEST_REPORT.md`: 系统测试报告
 
 ## 许可证
 

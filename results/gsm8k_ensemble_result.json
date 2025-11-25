@@ -1,0 +1,33 @@
+{
+  "task": "gsm8k",
+  "score": 0.0,
+  "weights": [
+    0.3286889015152251,
+    0.34690058333385726,
+    0.1805142481402614,
+    0.04804038081679878,
+    0.09585588619385735
+  ],
+  "members": [
+    {
+      "score": 0.0,
+      "prompt": "## Task\nSolve the math problem.\n\n## Prediction\nInput: {input}\nExpected:"
+    },
+    {
+      "score": 0.0,
+      "prompt": "DUMMY_PROMPT: You are an expert prompt engineer.\nThe following prompt is currently being used, but it fails on some examples.\nYour task is to analyze the failures and produce an improved prompt.\n\n=== CURRENT PROMPT"
+    },
+    {
+      "score": 0.0,
+      "prompt": "DUMMY_PROMPT: You are an expert prompt engineer.\nThe following prompt is currently being used, but it fails on some examples.\nYour task is to analyze the failures and produce an improved prompt.\n\n=== CURRENT PROMPT"
+    },
+    {
+      "score": 0.0,
+      "prompt": "DUMMY_PROMPT: You are an expert prompt engineer.\nThe following prompt is currently being used, but it fails on some examples.\nYour task is to analyze the failures and produce an improved prompt.\n\n=== CURRENT PROMPT"
+    },
+    {
+      "score": 0.0,
+      "prompt": "DUMMY_PROMPT: You are an expert prompt engineer.\nThe following prompt is currently being used, but it fails on some examples.\nYour task is to analyze the failures and produce an improved prompt.\n\n=== CURRENT PROMPT"
+    }
+  ]
+}
