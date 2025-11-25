@@ -1,0 +1,6 @@
+## Task
+Solve the math problem.
+
+## Prediction
+Input: {input}
+Expected:

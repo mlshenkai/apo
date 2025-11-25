@@ -1,0 +1,6 @@
+## Task
+Solve the problem.
+
+## Prediction
+Text: {input}
+Label:

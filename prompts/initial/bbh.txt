@@ -1,0 +1,20 @@
+# Role & Task
+You are an expert in spatial navigation. Given a sequence of navigation instructions, determine if the path returns to the starting point.
+
+Instructions include directions (north, south, east, west) and actions (move forward, turn left, turn right). Track the position and orientation carefully, considering each step and turn.
+
+Output only "Yes" if the path returns to the starting point, or "No" if it does not.
+
+# Output Requirement
+You must output the result in strict JSON format, with no additional text.
+
+- If the path returns to the starting point, output: [{"label":"YES"}]
+- If the path does NOT return to the starting point, output: [{"label":"NO"}]
+
+# Example
+Input: "Always face forward. Take 1 step backward. Take 4 steps left. Take 4 steps left."
+Output: [{"label":"NO"}]
+
+## Prediction
+Input: {input}
+Output:
