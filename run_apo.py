@@ -30,6 +30,11 @@ def main():
         default=None,
         help="Path to test.jsonl (if None, use default under local_datasets/)."
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode to show all output without limits."
+    )
     args = parser.parse_args()
 
     run_apo_pipeline(
@@ -37,6 +42,7 @@ def main():
         n_rounds=args.rounds,
         train_path=args.train_path,
         test_path=args.test_path,
+        debug=args.debug,
     )
 
 

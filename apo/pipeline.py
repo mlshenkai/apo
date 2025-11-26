@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import os
 import json
 import numpy as np
+from tqdm import tqdm
 
 from apo.config import get_config
 from apo.utils.llm_api import (
@@ -24,6 +25,7 @@ from apo.generators.hard_case import HardCaseTracker, HardCasePromptGenerator
 from apo.search.bayesian import BayesianPromptSelector
 from apo.search.mab import MABPromptSelector
 from apo.ensemble.voting import EnsembleVoter, EnsembleMember
+from apo.evaluators import get_evaluator
 
 
 @dataclass
@@ -37,39 +39,91 @@ def evaluate_prompt_on_dataset(
     prompt_text: str,
     task_model: TaskModel,
     dataset: List[Dict[str, Any]],
+    debug: bool = False,
+    show_progress: bool = True,
+    desc: str = "Evaluating",
+    print_errors: bool = True,
+    max_error_display: int = 10,
+    max_workers: int = 10
 ) -> Tuple[float, List[Tuple[Sample, str]], List[Any], List[Any]]:
     """
-    给定一个 prompt，在整个训练集上评估得到指标 + bad cases。
+    给定一个 prompt，在整个训练集上并行评估得到指标 + bad cases。
     返回：
       - score
       - bad_cases: List[(Sample, pred)]
       - preds
       - labels
+
+    Args:
+        task: 任务名称
+        prompt_text: 待评估的 prompt 文本
+        task_model: 任务模型
+        dataset: 数据集
+        debug: 是否启用调试模式
+        show_progress: 是否显示进度条
+        desc: 进度条描述
+        print_errors: 是否打印错误详情
+        max_error_display: 最多显示的错误数量
+        max_workers: 并发推理的最大线程数
     """
-    print(f"[DEBUG] evaluate_prompt_on_dataset() called with {len(dataset)} samples")
-    preds: List[Any] = []
-    labels: List[Any] = []
+    if not dataset:
+        return 0.0, [], [], []
+
+    # 获取对应任务的 evaluator
+    evaluator = get_evaluator(task)
+
+    # 准备批量推理的输入
+    input_texts = [item["input"] for item in dataset]
+    labels = [item["label"] for item in dataset]
+
+    # 构建完整的 prompt（假设 prompt_text 中有 {input} 占位符）
+    full_prompts = [prompt_text.replace("{input}", input_text) for input_text in input_texts]
+
+    # 并行推理
+    raw_outputs = task_model.infer_batch(
+        full_prompts=full_prompts,
+        input_texts=input_texts,
+        max_workers=max_workers,
+        desc=desc,
+        show_progress=show_progress
+    )
+
+    # 使用 evaluator 解析预测结果和标准化标签
+    preds = [evaluator.parse_pred(output) for output in raw_outputs]
+    normalized_labels = [evaluator.normalize_label(label) for label in labels]
+
+    # 收集 bad cases 和调试信息
     bad_cases: List[Tuple[Sample, str]] = []
+    error_count = 0
 
-    for i, item in enumerate(dataset):
-        input_text = item["input"]
-        label = item["label"]
-        # 这里你需要根据不同 task 的 prompt 模板拼接 full_prompt
-        # 简化假设：prompt_text 里留有 {input} 占位符
-        full_prompt = prompt_text.replace("{input}", input_text)
-        pred = task_model.infer(full_prompt, input_text)
+    for i, (pred, label, raw_output, input_text) in enumerate(zip(preds, normalized_labels, raw_outputs, input_texts)):
+        if debug and i < 3:  # Only print first 3 samples in debug mode
+            tqdm.write(f"[DEBUG] Sample {i}: raw_output={raw_output}, parsed_pred={pred}, normalized_label={label}")
 
-        if i < 3:  # Only print first 3 samples to avoid spam
-            print(f"[DEBUG] Sample {i}: pred={pred}, label={label}")
-
-        preds.append(pred)
-        labels.append(label)
         if pred != label:
             bad_cases.append((Sample(input_text=input_text, label=label), pred))
+            error_count += 1
 
-    score = task_metric(task, preds, labels)
-    print(f"[DEBUG] Evaluation complete: score={score:.4f}, bad_cases={len(bad_cases)}")
-    return score, bad_cases, preds, labels
+            # 打印错误详情
+            if print_errors and error_count <= max_error_display:
+                error_msg = (
+                    f"[Error] Sample {i}: "
+                    f"Expected '{label}', Got '{pred}' (raw: '{raw_output[:50]}...') | "
+                    f"Input: {input_text[:100]}{'...' if len(input_text) > 100 else ''}"
+                )
+                tqdm.write(error_msg)
+
+    score = task_metric(task, preds, normalized_labels)
+
+    # 打印评估摘要
+    if show_progress:
+        tqdm.write(f"✓ Evaluation complete: score={score:.4f}, bad_cases={len(bad_cases)}/{len(dataset)}")
+
+        if print_errors and len(bad_cases) > max_error_display:
+            tqdm.write(f"[Info] Showing first {max_error_display} errors. "
+                      f"Total errors: {len(bad_cases)}")
+
+    return score, bad_cases, preds, normalized_labels
 
 
 def run_apo_pipeline(
@@ -77,6 +131,7 @@ def run_apo_pipeline(
     n_rounds: Optional[int] = None,
     train_path: Optional[str] = None,
     test_path: Optional[str] = None,
+    debug: bool = False,
 ):
     # 加载配置
     config = get_config()
@@ -130,7 +185,10 @@ def run_apo_pipeline(
         base_prompt_text = "## Task\nSolve the problem.\n## Prediction\nInput: {input}\nOutput:"
         print(f"[DEBUG] Using default initial prompt")
 
-    print(f"[DEBUG] Initial prompt preview: {base_prompt_text[:100]}...")
+    if debug:
+        print(f"[DEBUG] Initial prompt:\n{base_prompt_text}")
+    else:
+        print(f"[DEBUG] Initial prompt preview: {base_prompt_text[:100]}...")
     prompt_population: List[PromptRecord] = [PromptRecord(text=base_prompt_text)]
     hard_tracker = HardCaseTracker(max_size=300)
 
@@ -138,10 +196,11 @@ def run_apo_pipeline(
     bad_gen = BadCaseReflectionGenerator(
         optimizer_llm,
         n_prompts=config.optimization.default_n_prompts,
-        n_iters=config.optimization.default_n_iters
+        n_iters=config.optimization.default_n_iters,
+        debug=debug
     )
-    evo_gen = EvolutionaryReflectionGenerator(optimizer_llm, n_mutation=5, n_zero_order=5)
-    hard_gen = HardCasePromptGenerator(optimizer_llm, k=10)
+    evo_gen = EvolutionaryReflectionGenerator(optimizer_llm, n_mutation=5, n_zero_order=5, debug=debug)
+    hard_gen = HardCasePromptGenerator(optimizer_llm, k=10, debug=debug)
 
     embedder = PromptEmbedder(model_name=config.embedding.model_name)
     bayes_selector = BayesianPromptSelector(
@@ -171,10 +230,10 @@ def run_apo_pipeline(
         # 如果是第一轮，先评估一次 base prompt
         if best_prompt.score is None:
             score, bad_cases, _, _ = evaluate_prompt_on_dataset(
-                task, best_prompt.text, task_model, train_data
+                task, best_prompt.text, task_model, train_data, debug,
+                desc=f"Round {round_id}: Initial Eval"
             )
             best_prompt.score = score
-            print(f"[Round {round_id}] Initial prompt score: {score:.4f}")
 
             # 更新 hard-case tracker
             for s, pred in bad_cases:
@@ -188,11 +247,10 @@ def run_apo_pipeline(
         # 6.2 生成 candidate prompts
         # 6.2.1 Bad-case Reflection 使用上一轮 best prompt + 最新 bad cases
         # 这里简单重算一次 bad cases，你也可以缓存
-        print(f"[Round {round_id}] Stage: Bad-case Reflection")
         _, bad_cases, _, _ = evaluate_prompt_on_dataset(
-            task, best_prompt.text, task_model, train_data
+            task, best_prompt.text, task_model, train_data, debug,
+            desc=f"Round {round_id}: Find Bad Cases"
         )
-        print(f"[Round {round_id}] Found {len(bad_cases)} bad cases, generating candidates...")
         bad_candidates = bad_gen.generate(best_prompt.text, bad_cases)
         print(f"[Round {round_id}] Generated {len(bad_candidates)} bad-case candidates")
 
@@ -239,14 +297,12 @@ def run_apo_pipeline(
         print(f"[Round {round_id}] Total selected: {len(selected_idx)} candidates for evaluation.")
 
         # 6.4 对选中 prompts 在训练集上评估
-        print(f"[Round {round_id}] Stage: Evaluating selected candidates")
         for i, idx in enumerate(selected_idx):
             text = candidate_texts[idx]
-            print(f"[Round {round_id}] Evaluating candidate {i+1}/{len(selected_idx)}...")
             score, bad_cases, _, _ = evaluate_prompt_on_dataset(
-                task, text, task_model, train_data
+                task, text, task_model, train_data, debug,
+                desc=f"Round {round_id}: Candidate {i+1}/{len(selected_idx)}"
             )
-            print(f"[Round {round_id}] Candidate {i+1} score: {score:.4f}")
             prompt_population.append(PromptRecord(text=text, score=score))
             emb = cand_embs[idx]
             evaluated_embs.append(emb)
@@ -273,9 +329,10 @@ def run_apo_pipeline(
     ensemble_members: List[EnsembleMember] = []
 
     # 在 train 上做一份"验证"预测（这里粗暴复用全部 train）
-    for pr in prompt_population_sorted[:top_k]:
+    for i, pr in enumerate(prompt_population_sorted[:top_k]):
         _, _, preds, _ = evaluate_prompt_on_dataset(
-            task, pr.text, task_model, train_data
+            task, pr.text, task_model, train_data, debug,
+            desc=f"Ensemble: Member {i+1}/{top_k} on Train"
         )
         ensemble_members.append(
             EnsembleMember(prompt_text=pr.text, preds_on_val=preds, score=pr.score)
@@ -301,9 +358,10 @@ def run_apo_pipeline(
     # 构造每个成员在 test 上的预测
     member_preds_test: List[List[Any]] = []
     labels_test = [item["label"] for item in test_data]
-    for member in ensemble_members:
+    for i, member in enumerate(ensemble_members):
         _, _, preds_t, _ = evaluate_prompt_on_dataset(
-            task, member.prompt_text, task_model, test_data
+            task, member.prompt_text, task_model, test_data, debug,
+            desc=f"Test: Member {i+1}/{len(ensemble_members)}"
         )
         member_preds_test.append(preds_t)
     preds_matrix = np.array(member_preds_test)  # (M, N)

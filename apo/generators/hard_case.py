@@ -59,9 +59,10 @@ class HardCasePromptGenerator:
     针对持续失败的难例样本生成专门优化的提示词。
     """
 
-    def __init__(self, optimizer_llm: LLMClient, k: int = 10):
+    def __init__(self, optimizer_llm: LLMClient, k: int = 10, debug: bool = False):
         self.optimizer_llm = optimizer_llm
         self.k = k
+        self.debug = debug
 
     def build_meta_prompt(self, hard_cases: List[HardCaseEntry]) -> str:
         parts = [
@@ -79,8 +80,12 @@ class HardCasePromptGenerator:
                 f"Failure times: {entry.error_count}\n"
                 f"Failed prompts (examples):"
             )
-            for j, p in enumerate(entry.failed_prompts[:3]):
-                parts.append(f"- Prompt {j+1}: {p[:200]}...")
+            # Show all failed prompts in debug mode, otherwise only first 3
+            prompt_limit = len(entry.failed_prompts) if self.debug else 3
+            for j, p in enumerate(entry.failed_prompts[:prompt_limit]):
+                # Show full prompt in debug mode, otherwise truncate to 200 chars
+                prompt_text = p if self.debug else f"{p[:200]}..."
+                parts.append(f"- Prompt {j+1}: {prompt_text}")
             parts.append("")
         parts.append(
             "Please output ONLY the new improved prompt text that is robust "

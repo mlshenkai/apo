@@ -20,10 +20,12 @@ class EvolutionaryReflectionGenerator:
 
     def __init__(self, optimizer_llm: LLMClient,
                  n_mutation: int = 5,
-                 n_zero_order: int = 5):
+                 n_zero_order: int = 5,
+                 debug: bool = False):
         self.optimizer_llm = optimizer_llm
         self.n_mutation = n_mutation
         self.n_zero_order = n_zero_order
+        self.debug = debug
 
     def _build_mutation_prompt(self, prompt_text: str) -> str:
         return (
@@ -44,7 +46,9 @@ class EvolutionaryReflectionGenerator:
             "",
             "=== EXISTING PROMPTS ===",
         ]
-        for i, p in enumerate(population[:5]):
+        # Show all prompts in debug mode, otherwise only first 5
+        limit = len(population) if self.debug else 5
+        for i, p in enumerate(population[:limit]):
             parts.append(f"Prompt {i+1}:\n{p.text}\n")
         parts.append("Return ONLY the new prompt text.")
         return "\n".join(parts)
@@ -53,19 +57,31 @@ class EvolutionaryReflectionGenerator:
         if not population:
             return []
 
-        # Mutation
+        # Mutation - 并发生成，带进度条
         mutation_candidates: List[str] = []
-        for i in range(min(self.n_mutation, len(population))):
-            p = population[i]
-            prompt = self._build_mutation_prompt(p.text)
-            mutated = self.optimizer_llm.generate(prompt)
-            mutation_candidates.append(mutated.strip())
+        n_mutations = min(self.n_mutation, len(population))
+        if n_mutations > 0:
+            mutation_prompts = [
+                self._build_mutation_prompt(population[i].text)
+                for i in range(n_mutations)
+            ]
+            mutation_results = self.optimizer_llm.generate_batch(
+                mutation_prompts,
+                max_workers=10,
+                desc="Evolutionary Mutation"
+            )
+            mutation_candidates = [m.strip() for m in mutation_results if m.strip()]
 
-        # Zero-order (crossover-like)
+        # Zero-order (crossover-like) - 并发生成，带进度条
         zero_candidates: List[str] = []
-        z_prompt = self._build_zero_order_prompt(population)
-        for _ in range(self.n_zero_order):
-            new_prompt = self.optimizer_llm.generate(z_prompt)
-            zero_candidates.append(new_prompt.strip())
+        if self.n_zero_order > 0:
+            z_prompt = self._build_zero_order_prompt(population)
+            zero_prompts = [z_prompt] * self.n_zero_order
+            zero_results = self.optimizer_llm.generate_batch(
+                zero_prompts,
+                max_workers=10,
+                desc="Evolutionary Zero-Order"
+            )
+            zero_candidates = [z.strip() for z in zero_results if z.strip()]
 
         return mutation_candidates + zero_candidates

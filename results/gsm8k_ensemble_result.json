@@ -1,33 +1,33 @@
 {
   "task": "gsm8k",
-  "score": 0.0,
+  "score": 0.9,
   "weights": [
-    0.3286889015152251,
-    0.34690058333385726,
-    0.1805142481402614,
-    0.04804038081679878,
-    0.09585588619385735
+    0.2969704316675306,
+    0.12750030050224265,
+    0.2613422002759192,
+    0.15095735304107094,
+    0.16322971451323665
   ],
   "members": [
     {
-      "score": 0.0,
+      "score": 0.9,
       "prompt": "## Task\nSolve the math problem.\n\n## Prediction\nInput: {input}\nExpected:"
     },
     {
-      "score": 0.0,
-      "prompt": "DUMMY_PROMPT: You are an expert prompt engineer.\nThe following prompt is currently being used, but it fails on some examples.\nYour task is to analyze the failures and produce an improved prompt.\n\n=== CURRENT PROMPT"
+      "score": 0.9,
+      "prompt": "Here's a new, improved prompt that combines clarity, robustness, and better reasoning structure:\n\n```\nYou are an expert mathematician and problem solver. Your task is to carefully analyze and solve mathematical problems with precision.\n\n## Instructions\n1. Examine the input problem thoroughly\n2. Identify all components and operations involved\n3. Show your step-by-step reasoning process\n4. Verify your calculations at each stage\n5. Present the final solution clearly\n\n## Output Format\n- Begin with \"Problem Analysis:\" explaining the problem structure\n- Show \"Solution Steps:\" with detailed working\n- Conclude with \"Final Answer:\" in bold\n\n## Example\nInput: What is 15% of 200?\nProblem Analysis: This is a percentage calculation problem asking to find 15% of 200.\nSolution Steps:\n1. Convert percentage to decimal: 15% = 0.15\n2. Multiply by total: 0.15 × 200\n3. Calculation: 0.15 × 200 = 30\nFinal Answer: **30**\n\nNow solve this problem:\nInput: {input}\n```\n\nThis prompt improves upon the original by:\n1. Adding clear role definition (expert mathematician)\n2. Providing structured instructions\n3. Including verification steps\n4. Offering a complete output format\n5. Showing an illustrative example\n6. Maintaining robustness for various math problems\n7. Ensuring clarity through organized sections"
     },
     {
-      "score": 0.0,
-      "prompt": "DUMMY_PROMPT: You are an expert prompt engineer.\nThe following prompt is currently being used, but it fails on some examples.\nYour task is to analyze the failures and produce an improved prompt.\n\n=== CURRENT PROMPT"
+      "score": 0.9,
+      "prompt": "Here's a refined prompt that combines clarity, structure, and robustness while maintaining focus on the task:\n\n```\n**Task:**  \nSolve the given math problem accurately and provide the final answer.  \n\n**Instructions:**  \n1. Carefully analyze the input problem.  \n2. Show step-by-step reasoning if the problem requires multiple operations.  \n3. Verify your calculations for correctness.  \n4. Present the final answer clearly and concisely.  \n\n**Input:**  \n{input}  \n\n**Output Format:**  \n- If multi-step: Display steps labeled (1), (2), etc., followed by \"Final Answer: [result]\".  \n- If single-step: Directly provide \"Answer: [result]\".  \n\n**Note:**  \n- Use exact values (no approximations) unless specified otherwise.  \n- For word problems, first extract the mathematical operation(s) needed.  \n```  \n\n**Strengths:**  \n1. **Structured clarity** with labeled sections.  \n2. **Adaptive output** (handles both simple/complex problems).  \n3. **Error reduction** via verification emphasis.  \n4. **Word problem support** with explicit extraction step.  \n5. **Minimized ambiguity** with formatting rules.  \n\n(No introductory/closing fluff to avoid token waste.)"
     },
     {
-      "score": 0.0,
-      "prompt": "DUMMY_PROMPT: You are an expert prompt engineer.\nThe following prompt is currently being used, but it fails on some examples.\nYour task is to analyze the failures and produce an improved prompt.\n\n=== CURRENT PROMPT"
+      "score": 0.88,
+      "prompt": "## Task\nSolve the math problem step by step, showing all calculations and reasoning. Ensure the final answer is clearly stated.\n\n## Prediction\nInput: {input}\nExpected: \n\nBreak down the problem into smaller steps:\n1. Identify all given quantities and relationships\n2. Determine what needs to be calculated\n3. Perform necessary calculations systematically\n4. Verify each step for accuracy\n5. Present the final answer with proper units\n\nShow your work clearly and provide the final numerical answer at the end."
     },
     {
-      "score": 0.0,
-      "prompt": "DUMMY_PROMPT: You are an expert prompt engineer.\nThe following prompt is currently being used, but it fails on some examples.\nYour task is to analyze the failures and produce an improved prompt.\n\n=== CURRENT PROMPT"
+      "score": 0.88,
+      "prompt": "```  \n## Task  \nSolve the given math problem step-by-step, ensuring accuracy and clarity in your reasoning.  \n\n## Prediction  \nInput: {input}  \nExpected:  \n\n(Provide the final answer and a brief explanation of the steps taken to reach the solution.)  \n```  \n\nThis revision improves clarity by specifying the need for step-by-step reasoning and a brief explanation, while maintaining the same task and output format. It also encourages robustness by emphasizing accuracy."
     }
   ]
 }

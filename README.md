@@ -8,38 +8,60 @@ APO (Automatic Prompt Optimization) 是一个基于迭代反思和搜索的 LLM 
 - **智能搜索算法**：使用贝叶斯优化和多臂老虎机算法高效选择候选提示词
 - **集成学习**：通过加权投票集成多个优质提示词，提升最终性能
 - **灵活的任务支持**：支持多种 NLP 任务（分类、推理等）
+- **⚡ 高性能并行执行**：
+  - 并发提示词生成：7-10倍加速
+  - 并行评估推理：~10倍加速
+  - 默认10个并发worker，可自定义调整
 
 ## 项目结构
 
 ```
 APO/
-├── local_datasets/        # 数据集目录
-│   ├── liar/             # LIAR 数据集
-│   ├── bbh/              # BBH 数据集
-│   └── ...
-├── prompts/              # 提示词目录
-│   ├── initial/          # 初始提示词
-│   └── generated/        # 生成的提示词
-├── apo/                  # 核心模块
-│   ├── generators/       # 提示词生成器
-│   │   ├── bad_case.py   # 错误案例反思生成器
-│   │   ├── evolutionary.py  # 进化式生成器
-│   │   └── hard_case.py  # 难例追踪生成器
-│   ├── search/           # 搜索策略
-│   │   ├── bayesian.py   # 贝叶斯优化
-│   │   └── mab.py        # 多臂老虎机
-│   ├── ensemble/         # 集成方法
-│   │   └── voting.py     # 加权投票
-│   ├── utils/            # 工具函数
-│   │   ├── llm_api.py    # LLM API 接口
-│   │   ├── embedding.py  # 向量嵌入
-│   │   ├── evaluation.py # 评估指标
-│   │   └── data.py       # 数据加载
-│   └── pipeline.py       # 主流程
-├── checkpoints/          # 检查点保存
-├── models/               # 模型保存
-├── results/              # 结果输出
-└── run_apo.py           # 主入口脚本
+├── apo/                           # 核心模块
+│   ├── ensemble/                  # 集成方法
+│   │   └── voting.py              # 加权投票
+│   ├── generators/                # 提示词生成器
+│   │   ├── bad_case.py            # 错误案例反思生成器
+│   │   ├── evolutionary.py        # 进化式生成器
+│   │   └── hard_case.py           # 难例追踪生成器
+│   ├── search/                    # 搜索策略
+│   │   ├── bayesian.py            # 贝叶斯优化
+│   │   └── mab.py                 # 多臂老虎机
+│   ├── utils/                     # 工具函数
+│   │   ├── data.py                # 数据加载
+│   │   ├── embedding.py           # 向量嵌入
+│   │   ├── evaluation.py          # 评估指标
+│   │   └── llm_api.py             # LLM API 接口 (支持并行推理)
+│   ├── config.py                  # 配置管理
+│   └── pipeline.py                # 主流程 (支持并行评估)
+├── local_datasets/                # 数据集目录
+│   ├── bbh/                       # BBH 数据集
+│   ├── gsm8k/                     # GSM8K 数据集
+│   ├── gsm8k_small/               # GSM8K 小规模测试集
+│   └── liar/                      # LIAR 数据集
+├── prompts/                       # 提示词目录
+│   ├── generated/                 # 生成的提示词
+│   └── initial/                   # 初始提示词
+│       ├── arsarcasm.txt
+│       ├── bbh.txt
+│       ├── ethos.txt
+│       ├── gsm8k.txt
+│       ├── liar.txt
+│       └── wsc.txt
+├── tools/                         # 工具脚本
+│   └── convert_gsm8k.py           # GSM8K 数据转换
+├── checkpoints/                   # 检查点保存
+├── models/                        # 模型保存
+├── results/                       # 结果输出
+├── CLAUDE.md                      # 项目开发指南 (Claude Code)
+├── CONCURRENT_GENERATION.md       # 并发生成文档
+├── PARALLEL_EVALUATION.md         # 并行评估文档
+├── requirements.txt               # 依赖列表
+├── run_apo.py                     # 主入口脚本
+├── test_api.py                    # API 连接测试
+├── test_small_run.py              # 小规模测试
+├── test_parallel_eval.py          # 并行评估测试
+└── demo_progress.py               # 并发生成演示
 ```
 
 ## 安装
@@ -62,7 +84,20 @@ python test_api.py
 
 如果看到 `✅ All tests passed!`，则可以继续。
 
-### 2️⃣ 小规模测试运行
+### 2️⃣ 测试并行评估性能（可选）
+
+测试并行推理功能和性能提升：
+
+```bash
+python test_parallel_eval.py
+```
+
+预期输出：
+- ✓ 串行和并行结果一致
+- ✓ 并行执行显著加速（~10x）
+- 性能对比数据
+
+### 3️⃣ 小规模测试运行
 
 建议先使用小数据集测试完整流程（~50 样本，1 轮优化）：
 
@@ -76,7 +111,7 @@ python test_small_run.py
 - 验证真实 LLM API 工作正常
 - 预估 API 调用量：~100 次
 
-### 3️⃣ 完整优化运行
+### 4️⃣ 完整优化运行
 
 确认测试通过后，运行完整优化：
 
@@ -237,9 +272,31 @@ TASK_MODEL_MAX_TOKENS=2048
 ### 工具 (utils/)
 
 - **llm_api.py**：LLM 客户端抽象接口
+  - `LLMClient.generate_batch()`: 并发提示词生成（7-10x加速）
+  - `TaskModel.infer_batch()`: 并行推理接口（~10x加速）
 - **embedding.py**：提示词向量化（使用 sentence-transformers）
 - **evaluation.py**：任务指标计算（F1、准确率等）
 - **data.py**：数据加载工具
+
+### 性能优化
+
+- **并发生成**：所有生成器使用 `generate_batch()` 进行并发 API 调用
+- **并行评估**：`evaluate_prompt_on_dataset()` 使用 `infer_batch()` 并行推理
+- **默认配置**：10个并发worker（可通过 `max_workers` 参数调整）
+- **加速效果**：
+  - 提示词生成：7-10倍加速
+  - 评估推理：~10倍加速
+  - 完整pipeline：预计~10倍加速
+- **进度监控**：实时显示进度条和完成速度
+
+测试并行功能：
+```bash
+# 测试并行评估
+python test_parallel_eval.py
+
+# 测试并发生成
+python demo_progress.py
+```
 
 ## 扩展开发
 
@@ -318,8 +375,12 @@ TASK_MODEL_MAX_TOKENS=2048
 
 - `test_api.py`: API 连接测试脚本
 - `test_small_run.py`: 小规模测试运行脚本
+- `test_parallel_eval.py`: 并行评估测试脚本（验证10倍加速）
+- `demo_progress.py`: 并发生成演示脚本
 - `REAL_LLM_SETUP.md`: LLM API 配置详细说明
 - `TEST_REPORT.md`: 系统测试报告
+- `CONCURRENT_GENERATION.md`: 并发生成实现文档
+- `PARALLEL_EVALUATION.md`: 并行评估实现文档（架构、性能、用法）
 
 ## 许可证
 

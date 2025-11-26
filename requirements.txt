@@ -2,5 +2,8 @@ numpy>=1.24.0
 scipy>=1.10.0
 scikit-learn>=1.3.0
 python-dotenv>=1.0.0
+tqdm>=4.65.0
 
+# Embedding providers (at least one required)
 sentence-transformers>=2.2.0
+openai>=1.0.0

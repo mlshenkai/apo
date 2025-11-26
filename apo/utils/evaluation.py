@@ -56,3 +56,5 @@ def task_metric(task: str, preds: List[Any], labels: List[Any]) -> float:
     else:
         # 默认 F1
         return macro_f1(preds, labels)
+
+
