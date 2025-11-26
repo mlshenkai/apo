@@ -64,7 +64,7 @@ class OpenAIProvider(EmbeddingProvider):
         "text-embedding-3-large": 3072,
     }
 
-    def __init__(self, model_name: str, api_key: Optional[str] = None):
+    def __init__(self, model_name: str, api_key: Optional[str] = None, base_url: Optional[str] = None):
         if OpenAI is None:
             raise ImportError(
                 "openai 库未安装。"
@@ -79,7 +79,14 @@ class OpenAIProvider(EmbeddingProvider):
             )
 
         # 使用提供的 api_key 或从环境变量读取
-        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        # 使用提供的 base_url 或从环境变量读取
+        client_kwargs = {
+            "api_key": api_key or os.getenv("OPENAI_API_KEY")
+        }
+        if base_url or os.getenv("OPENAI_BASE_URL"):
+            client_kwargs["base_url"] = base_url or os.getenv("OPENAI_BASE_URL")
+
+        self.client = OpenAI(**client_kwargs)
         self._dim = self.DIMENSIONS[model_name]
 
     def embed(self, texts: List[str]) -> np.ndarray:
@@ -142,7 +149,8 @@ class PromptEmbedder:
         model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         provider: Optional[str] = None,
         dim: int = 384,
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None
     ):
         """
         初始化 PromptEmbedder。
@@ -152,6 +160,7 @@ class PromptEmbedder:
             provider: 显式指定 provider ("sentence-transformers", "openai", "random")
             dim: 仅用于 random provider 的向量维度
             api_key: OpenAI API key (可选，默认从环境变量 OPENAI_API_KEY 读取)
+            base_url: OpenAI API base URL (可选，默认从环境变量 OPENAI_BASE_URL 读取)
         """
         self.model_name = model_name
         self.provider_name = provider or self._detect_provider(model_name)
@@ -159,7 +168,7 @@ class PromptEmbedder:
         # 初始化对应的 provider
         try:
             if self.provider_name == "openai":
-                self._provider = OpenAIProvider(model_name, api_key)
+                self._provider = OpenAIProvider(model_name, api_key, base_url)
             elif self.provider_name == "sentence-transformers":
                 # 移除 "sentence-transformers/" 前缀（如果存在）
                 model_path = model_name.replace("sentence-transformers/", "")
