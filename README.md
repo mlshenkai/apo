@@ -1,6 +1,18 @@
-# APO - 自动提示词优化框架
+# ELPO - 基于集成学习的提示词优化框架
 
-APO (Automatic Prompt Optimization) 是一个基于迭代反思和搜索的 LLM 提示词自动优化框架。该系统通过评估提示词在任务上的表现，基于失败案例分析生成改进版本，并使用贝叶斯优化和多臂老虎机搜索策略高效探索提示词空间。
+**ELPO (Ensemble Learning based Prompt Optimization)** 是一个创新的大语言模型提示词自动优化框架。该系统结合集成学习思想，通过多种生成策略和搜索算法的协同工作，实现对提示词的高效优化。
+
+> 📄 **论文**: Zhang, Q., Xu, B., Zhang, X., et al. (2025). "ELPO: Ensemble Learning Based Prompt Optimization for Large Languages Models". *arXiv:2511.16122* [[PDF]](docs/2511.16122v1.pdf)
+
+## 研究背景
+
+本项目基于 ByteDance 和香港大学的联合研究成果。与现有的单一优化算法方法不同，ELPO 采用集成学习策略，结合多个生成器和搜索方法，在多个基准数据集上显著超越了现有技术（如 APE、ProTeGi、OPRO、PromptBreeder 等）。
+
+**核心创新**：
+- 🎯 **多策略集成**：融合错误案例反思、进化式优化和难例追踪三种生成策略
+- 🔍 **高效搜索**：首次将贝叶斯优化与多臂老虎机算法结合应用于提示词优化
+- 🏆 **集成投票**：通过加权投票机制聚合多个高质量提示词，提升鲁棒性和泛化能力
+- ⚡ **高性能执行**：并发生成和并行评估实现 7-10 倍加速
 
 ## 特性
 
@@ -63,6 +75,27 @@ APO/
 ├── test_parallel_eval.py          # 并行评估测试
 └── demo_progress.py               # 并发生成演示
 ```
+
+## 实验结果
+
+ELPO 在 6 个基准数据集上的表现显著优于现有方法：
+
+| 数据集 | 指标 | ELPO | GPO | EvoPrompt | PromptBreeder | OPRO | ProTeGi | APE | CoT | 提升幅度 |
+|--------|------|------|-----|-----------|---------------|------|---------|-----|-----|----------|
+| **LIAR** | F1 | **72.1** | 56.6 | 52.3 | 51.8 | 52.1 | 60.3 | 51.2 | 46.0 | +11.8 |
+| **BBH** | F1 | **91.1** | 75.0 | 76.4 | 75.7 | 75.0 | 73.6 | 74.3 | 81.9 | +9.2 |
+| **ETHOS** | F1 | **98.4** | 95.5 | 94.3 | 95.7 | 94.8 | 97.0 | 93.2 | 84.5 | +1.4 |
+| **ArSarcasm** | F1 | **92.3** | 83.8 | 83.9 | 84.5 | 84.7 | 84.1 | 84.3 | 83.7 | +7.6 |
+| **WSC** | Acc. | **95.9** | 84.0 | 78.8 | 80.0 | 83.3 | 80.0 | 79.3 | 81.3 | +11.9 |
+| **GSM8K** | Acc. | **96.0** | 90.3 | 90.7 | 91.7 | 90.7 | 91.0 | 91.3 | 89.0 | +4.3 |
+
+**关键发现**：
+- ✅ ELPO 在所有 6 个数据集上均取得最优性能
+- ✅ 相比次优方法平均提升 **7.9 个百分点**
+- ✅ 在复杂推理任务（如 BBH、WSC）上提升尤为显著（>9 分）
+- ✅ 通过消融实验验证了各组件的有效性
+
+详细实验结果和分析请参阅论文。
 
 ## 安装
 
@@ -153,28 +186,76 @@ python run_apo.py --task gsm8k --rounds 1 --no-use_real_llm
 
 ## 工作原理
 
-### 优化流程
+### ELPO 优化流程
 
-1. **初始化**
-   - 加载数据集和初始提示词（从 `prompts/initial/<task>.txt`）
-   - 初始化优化器 LLM（如 GPT-4o）和任务 LLM（如 Doubao-pro）
+ELPO 框架采用**共享生成-差异化搜索-集成投票**的三阶段优化策略：
 
-2. **迭代优化**（重复 n 轮）
-   - **评估**：在训练集上评估当前提示词，收集错误案例
-   - **生成**：使用三种策略生成候选提示词
-     - 错误案例反思：分析失败样本，生成改进版本
-     - 进化式反思：对现有提示词进行变异和交叉
-     - 难例追踪：针对持续失败的样本生成特殊提示词
-   - **搜索**：使用贝叶斯优化和 MAB 选择最有潜力的候选
-   - **更新**：评估选中的候选，更新提示词种群
+#### 第一阶段：初始化
+   - 加载训练/测试数据集（JSONL 格式）
+   - 加载初始提示词（从 `prompts/initial/<task>.txt`）
+   - 初始化**优化器 LLM**（如 GPT-4o，用于生成改进的提示词）
+   - 初始化**任务模型**（如 DeepSeek-V3，用于执行实际任务）
+   - 初始化 Hard-Case Tracker（全局难例追踪器）
 
-3. **集成构建**
-   - 选择 top-K 表现最好的提示词
-   - 优化加权投票的权重（在训练集上最大化指标）
-   - 在测试集上评估集成效果
+#### 第二阶段：迭代优化（重复 n 轮）
 
-4. **结果保存**
-   - 保存最终得分、权重和集成成员到 `results/` 目录
+每轮优化包含以下步骤：
+
+1. **并行评估**
+   - 在训练集上并行评估当前所有提示词（使用 `infer_batch()`）
+   - 收集每个提示词的错误案例、性能分数和预测结果
+   - 更新 Hard-Case Tracker 记录
+
+2. **共享生成**（Abundant Prompt Generation）
+
+   三种生成器**并发**生成候选提示词：
+
+   - **Bad-Case Reflection**（算法 1）：
+     - 采样失败案例 → 生成反思提示 → 迭代优化 → 添加 Few-shot 示例
+     - 生成 10 个候选提示词
+
+   - **Evolutionary Reflection**（算法 2）：
+     - Direct Mutation：对 top 提示词进行语义变异（生成 5 个）
+     - Zero-order Generation：综合种群特征生成全新提示词（生成 3 个）
+
+   - **Hard-Case Tracking**（算法 3）：
+     - 从全局 tracker 选择 top-k 难例 → 构建元提示 → 生成专门优化的提示词
+     - 生成 1 个候选提示词
+
+3. **高效搜索**（Efficient Prompt Search）
+
+   使用两种搜索算法**并行**选择候选：
+
+   - **Bayesian Search**（算法 4）：
+     - 嵌入所有候选 → 用 GPR 拟合性能函数 → 计算 EI 值 → 选择 top-N
+
+   - **Multi-Armed Bandit Search**（算法 5）：
+     - K-means 聚类候选 → 每个簇视为一个臂 → 使用 UCB 策略 → 迭代采样
+
+4. **评估与更新**
+   - 并行评估搜索选中的候选提示词
+   - 更新提示词种群（保留高性能提示词）
+   - 更新 Hard-Case Tracker
+
+#### 第三阶段：集成投票
+
+1. **构建集成**（Ensemble Voting，算法 6）
+   - 通过聚类和排序选择 top-M 个多样化的高性能提示词
+   - 在验证集上优化加权投票权重：
+     ```
+     min_w { -F1_macro(w) + λ||w||² }
+     s.t. Σw_j = 1, w_j ≥ w_min
+     ```
+
+2. **集成预测**
+   - 对每个测试样本，每个提示词独立预测
+   - 加权投票决定最终预测：
+     ```
+     ŷ(x) = argmax_y Σ w_j · I{f_j(x) = y}
+     ```
+
+3. **结果保存**
+   - 保存集成得分、权重、成员提示词到 `results/<task>_ensemble_result.json`
 
 ### 三层 LLM 架构
 
@@ -382,10 +463,66 @@ python demo_progress.py
 - `CONCURRENT_GENERATION.md`: 并发生成实现文档
 - `PARALLEL_EVALUATION.md`: 并行评估实现文档（架构、性能、用法）
 
+## 作者与贡献
+
+本项目基于以下研究成果：
+
+**研究团队**：
+- Qing Zhang*, Bing Xu*, Xudong Zhang*, Yifan Shi* (ByteDance, China)
+- Yang Li, Yijie Chen, Hong Dai, Xiansen Chen, Mian Zhang (ByteDance, China)
+- Chen Zhang, Yik Chung Wu, Ngai Wong (The University of Hong Kong)
+
+(*Equal contribution)
+
+**联系方式**：
+- Qing Zhang: zhangqing.thomas@bytedance.com
+
+如果你在研究中使用了本项目，请引用我们的论文：
+
+```bibtex
+@article{zhang2025elpo,
+  title={ELPO: Ensemble Learning Based Prompt Optimization for Large Languages Models},
+  author={Zhang, Qing and Xu, Bing and Zhang, Xudong and Shi, Yifan and Li, Yang and Zhang, Chen and Wu, Yik Chung and Wong, Ngai and Chen, Yijie and Dai, Hong and Chen, Xiansen and Zhang, Mian},
+  journal={arXiv preprint arXiv:2511.16122},
+  year={2025}
+}
+```
+
 ## 许可证
 
 本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
 
-## 技术特点
+## 技术特点与创新
 
-本项目结合了反思学习、进化算法和贝叶斯优化等多种技术，实现了高效的自动提示词优化。
+### 核心算法
+
+ELPO 框架的技术创新主要体现在以下几个方面：
+
+1. **多策略提示词生成**
+   - **Bad-Case Reflection**：深度分析失败案例，通过反思机制生成针对性改进
+   - **Evolutionary Reflection**：借鉴遗传算法，通过变异（Mutation）和零阶生成（Zero-order Generation）进化提示词
+   - **Hard-Case Tracking**：全局追踪跨多个提示词反复失败的样本，生成专门优化的提示词
+
+2. **高效搜索策略**
+   - **Bayesian Search**：使用高斯过程回归（GPR）建模性能landscape，通过期望改进（Expected Improvement, EI）准则选择候选
+   - **Multi-Armed Bandit (MAB) Search**：将候选聚类后视为臂，使用 UCB (Upper Confidence Bound) 策略平衡探索与利用
+   - 首次将贝叶斯优化与 MAB 结合应用于提示词优化领域
+
+3. **集成投票机制**
+   - 选择 top-K 多样化的高性能提示词构建集成
+   - 通过优化加权投票权重最大化验证集性能
+   - 显著提升模型鲁棒性和泛化能力
+
+4. **并发执行优化**
+   - 所有生成器使用 `generate_batch()` 实现并发 API 调用（7-10x 加速）
+   - 评估流程使用 `infer_batch()` 实现并行推理（~10x 加速）
+   - 整体 pipeline 效率提升约 10 倍
+
+### 理论基础
+
+- **"No Free Lunch" 定理**：单一优化算法无法在所有任务上表现最优，因此 ELPO 采用集成策略
+- **集成学习理论**：通过聚合多个"好但不稳定"的模型（提示词）提升整体性能
+- **贝叶斯优化**：基于概率模型的全局优化方法，高效探索高维搜索空间
+- **强化学习（MAB）**：通过试错学习最优策略，适应性分配评估资源
+
+详细技术说明请参阅论文和 `CLAUDE.md`。
